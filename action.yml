@@ -8,6 +8,9 @@ inputs:
   test-directories:
     description: Comma-separated paths relative to the repository root.
     default: tests,test
+  test-file-patterns:
+    description: Comma-separated glob patterns matched against filenames in any directory.
+    default: 'test_*,*_test.go'
 
 runs:
   using: composite
@@ -37,6 +40,7 @@ runs:
       env:
         PR_HEAD: ${{ github.event.pull_request.head.sha }}
         TEST_DIRECTORIES: ${{ inputs.test-directories }}
+        TEST_FILE_PATTERNS: ${{ inputs.test-file-patterns }}
       with:
         script: |
           const { spawnSync } = require("node:child_process");
@@ -46,6 +50,9 @@ runs:
           const head = process.env.PR_HEAD;
           const testDirectories = process.env.TEST_DIRECTORIES.split(",")
             .map(directory => directory.trim().replace(/\/+$/, ""))
+            .filter(Boolean);
+          const testFilePatterns = process.env.TEST_FILE_PATTERNS.split(",")
+            .map(pattern => pattern.trim())
             .filter(Boolean);
           const options = { silent: true };
           const mergeBase = await exec.getExecOutput("git", ["merge-base", "HEAD", head], options);
@@ -130,7 +137,8 @@ runs:
             for (const { added, removed, newPath, key } of files) {
               const counts = changes.map(group => group.get(key));
               if (counts.some(count => count !== undefined)) {
-                const isTest = testDirectories.some(directory => newPath.startsWith(directory + "/"));
+                const isTest = testDirectories.some(directory => newPath.startsWith(directory + "/")) ||
+                  testFilePatterns.some(pattern => path.matchesGlob(path.basename(newPath), pattern));
                 const row = isTest ? totals[1] : totals[0];
                 counts.forEach((count, column) => { row[column] += count?.code ?? 0; });
               } else {

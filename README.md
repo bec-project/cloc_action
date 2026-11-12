@@ -27,10 +27,13 @@ jobs:
       - uses: bec-project/cloc_action@v1
         with:
           test-directories: tests,test
+          test-file-patterns: 'test_*,*_test.go'
 ```
 
 The action runs on Ubuntu and installs cloc. It checks out the trusted base and reads Git blobs from the PR commit as data. The `synchronize` trigger refreshes the comment after a push to an open PR.
 
 Set `test-directories` to a comma-separated list of paths relative to the repository root. The default is `tests,test`.
+
+Set `test-file-patterns` to a comma-separated list of filename globs. The default matches `test_*` and `*_test.go` in any directory. For example, add `*.spec.ts` to count TypeScript spec files as test LOC. Set the input to an empty string to use only the directory rules.
 
 Semantic release runs on pushes to `main`. It publishes versioned GitHub releases from Conventional Commits and advances the corresponding major tag, such as `v1`.
