@@ -1,6 +1,10 @@
 # PR line count action
 
-This composite action updates a sticky pull request comment with three rows for source LOC, test LOC, and docs, data, and assets. It compares the PR head with the merge base. cloc reports added, removed, and modified code lines for recognized source and test files. Git reports added and removed text lines for other files. Binary files contribute zero lines.
+This composite action updates a sticky pull request comment. It compares the PR head with the merge base and reports four rows.
+
+- **Source LOC** and **Test LOC** show added, removed, and modified code lines as classified by cloc.
+- **Comments and docstrings** shows changes to the lines cloc classifies as comments in source and test files, including Python docstrings.
+- **Docs, data, and assets** shows Git's added and removed text lines for other files. Binary files contribute zero lines.
 
 Add this workflow to the consuming repository's base branch.
 
