@@ -174,16 +174,27 @@ runs:
             throw new Error("Invalid PR line counts");
           }
 
-          const marker = "<!-- ophyd-devices-pr-line-count -->";
+          const numberFormat = new Intl.NumberFormat("en-US");
+          function formatCount(count, color, sign = "") {
+            if (count === 0) return "0";
+            return `$\\textcolor{${color}}{\\text{${sign}${numberFormat.format(count)}}}$`;
+          }
+
+          const marker = "<!-- cloc-action-pr-line-count -->";
+          // Recognize comments created before the marker was renamed.
+          const legacyMarker = "<!-- ophyd-devices-pr-line-count -->";
           const body = [
             marker,
             "### PR line count",
             "",
             "| Category | Added | Removed | Modified |",
             "| --- | ---: | ---: | ---: |",
-            ...counts.map(([added, removed, modified], index) =>
-              `| ${labels[index]} | ${added} | ${removed} | ${index === labels.length - 1 ? "—" : modified} |`
-            ),
+            ...counts.map(([added, removed, modified], index) => {
+              const addedCell = formatCount(added, "#2f855a", "+");
+              const removedCell = formatCount(removed, "#d0444c", "−");
+              const modifiedCell = index === labels.length - 1 ? "—" : formatCount(modified, "#3478d4");
+              return `| ${labels[index]} | ${addedCell} | ${removedCell} | ${modifiedCell} |`;
+            }),
             "",
             "cloc counts code, comments, and docstrings in source and test files. Git counts text changes in the other files.",
           ].join("\n");
@@ -193,9 +204,9 @@ runs:
             ...issue,
             per_page: 100,
           });
-          const existing = comments.find(({ user, body }) =>
-            user?.login === "github-actions[bot]" && body?.startsWith(marker)
-          );
+          const botComments = comments.filter(({ user }) => user?.login === "github-actions[bot]");
+          const existing = botComments.find(({ body }) => body?.startsWith(marker)) ??
+            botComments.find(({ body }) => body?.startsWith(legacyMarker));
           if (!existing) {
             await github.rest.issues.createComment({ ...issue, body });
           } else if (existing.body !== body) {
