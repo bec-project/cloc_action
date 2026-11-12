@@ -1,6 +1,6 @@
-# PR line count
+# PR line count action
 
-This reusable GitHub Actions workflow updates a sticky PR comment with source LOC, test LOC, and changes to docs, data, and assets. It compares the PR head with the merge base. For recognized source and test files, cloc counts added, removed, and modified code lines. For other files, Git counts added and removed text lines. Binary assets contribute zero lines.
+This composite action updates a sticky pull request comment with three rows for source LOC, test LOC, and docs, data, and assets. It compares the PR head with the merge base. cloc reports added, removed, and modified code lines for recognized source and test files. Git reports added and removed text lines for other files. Binary files contribute zero lines.
 
 Add this workflow to the consuming repository's base branch.
 
@@ -21,11 +21,16 @@ concurrency:
 
 jobs:
   line-count:
-    uses: bec-project/cloc_action/.github/workflows/pr-line-count.yml@main
-    with:
-      test-directories: tests,test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: bec-project/cloc_action@v1
+        with:
+          test-directories: tests,test
 ```
 
-Pin the workflow reference to a commit SHA when adopting it. The counting job has read-only repository access and fetches the PR commit as input data. A separate job updates the comment. The `synchronize` event refreshes the count when someone pushes to the PR branch.
+The action runs on Ubuntu and installs cloc. It checks out the trusted base and reads Git blobs from the PR commit as data. The `synchronize` trigger refreshes the comment after a push to an open PR.
 
-Set `test-directories` to a comma-separated list of paths relative to the consuming repository root. The default is `tests,test`.
+Set `test-directories` to a comma-separated list of paths relative to the repository root. The default is `tests,test`.
+
+Semantic release runs on pushes to `main`. It publishes versioned GitHub releases from Conventional Commits and advances the corresponding major tag, such as `v1`.
