@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.3.0 (2026-11-12)
+
+### Features
+
+- Color PR line count changes
+  ([`3296ced`](https://github.com/bec-project/cloc_action/commit/3296ced74c2ea2f2e693aeb517ec83c6444e8aa4))
+
+
 ## v1.2.0 (2026-11-12)
 
 ### Bug Fixes
