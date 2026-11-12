@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.2.0 (2026-11-12)
+
+### Bug Fixes
+
+- Restore semantic-release changelog updates
+  ([`842a29b`](https://github.com/bec-project/cloc_action/commit/842a29bc75dfed9aec4df56485563e6cfac7f4bf))
+
+### Features
+
+- Report comments and docstrings in PR line counts
+  ([`bfa4a6b`](https://github.com/bec-project/cloc_action/commit/bfa4a6bf379a22cbfe8513fa2b26d21a589c852a))
+
+
 ## v1.1.1 (2026-11-12)
 
 ### Bug Fixes
