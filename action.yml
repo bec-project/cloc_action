@@ -13,7 +13,7 @@ runs:
   using: composite
   steps:
     # Check out the trusted base. The PR commit is fetched only as input data.
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         ref: ${{ github.event.pull_request.base.sha }}
         fetch-depth: 0
