@@ -1,0 +1,192 @@
+name: PR line count
+description: Update a sticky PR comment with separate source, test, and other file counts.
+branding:
+  icon: bar-chart-2
+  color: blue
+
+inputs:
+  test-directories:
+    description: Comma-separated paths relative to the repository root.
+    default: tests,test
+
+runs:
+  using: composite
+  steps:
+    # Check out the trusted base. The PR commit is fetched only as input data.
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.base.sha }}
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Fetch PR commit
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR_HEAD: ${{ github.event.pull_request.head.sha }}
+      run: |
+        git -c credential.helper= -c 'credential.helper=!gh auth git-credential' \
+          fetch --no-tags origin "$PR_HEAD"
+    - name: Install cloc
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --yes cloc
+    - name: Count changed lines
+      id: count
+      uses: actions/github-script@v9
+      env:
+        PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        TEST_DIRECTORIES: ${{ inputs.test-directories }}
+      with:
+        script: |
+          const { spawnSync } = require("node:child_process");
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const head = process.env.PR_HEAD;
+          const testDirectories = process.env.TEST_DIRECTORIES.split(",")
+            .map(directory => directory.trim().replace(/\/+$/, ""))
+            .filter(Boolean);
+          const options = { silent: true };
+          const mergeBase = await exec.getExecOutput("git", ["merge-base", "HEAD", head], options);
+          const base = mergeBase.stdout.trim();
+          const diff = await exec.getExecOutput(
+            "git", ["diff", "--numstat", "-z", "--find-renames", base, head], options
+          );
+          const totals = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+          if (!diff.stdout) return totals;
+
+          async function blobsAt(revision) {
+            const tree = await exec.getExecOutput("git", ["ls-tree", "-rz", revision], options);
+            const blobs = new Map();
+            for (const entry of tree.stdout.split("\0").slice(0, -1)) {
+              const match = /^100(?:644|755) blob ([a-f0-9]+)\t(.*)$/s.exec(entry);
+              if (match) blobs.set(match[2], match[1]);
+            }
+            return blobs;
+          }
+
+          const oldBlobs = await blobsAt(base);
+          const newBlobs = await blobsAt(head);
+          const directory = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP, "pr-cloc-"));
+
+          try {
+            // Give cloc explicit file pairs. Its Git mode passes filenames through a shell.
+            function snapshot(side, index, filename, blob) {
+              if (!blob) return undefined;
+              const basename = path.basename(filename).replace(/[|;\r\n]/g, "_").replace(/^\s+|\s+$/g, "_");
+              const target = path.join(side, String(index), basename);
+              const destination = path.join(directory, target);
+              fs.mkdirSync(path.dirname(destination), { recursive: true });
+              const fd = fs.openSync(destination, "w");
+              try {
+                const result = spawnSync("git", ["cat-file", "blob", blob], { stdio: ["ignore", fd, "inherit"] });
+                if (result.error) throw result.error;
+                if (result.status !== 0) throw new Error("Could not read Git blob " + blob);
+              } finally {
+                fs.closeSync(fd);
+              }
+              return target;
+            }
+
+            const records = diff.stdout.split("\0");
+            const files = [];
+            const pairs = [];
+            const additions = [];
+            const removals = [];
+            for (let index = 0; index < records.length - 1; index++) {
+              const [, added, removed, filename] = /^(\d+|-)\t(\d+|-)\t(.*)$/s.exec(records[index]);
+              // Git emits an empty filename followed by the old and new paths for renames.
+              const oldPath = filename || records[++index];
+              const newPath = filename || records[++index];
+              if (added === "-") continue;
+              const before = snapshot("before", index, oldPath, oldBlobs.get(oldPath));
+              const after = snapshot("after", index, newPath, newBlobs.get(newPath));
+              files.push({ added, removed, newPath, key: before ?? after });
+              if (before && after) pairs.push(before + " | " + after);
+              else if (after) additions.push("  + " + after + " ;");
+              else if (before) removals.push("  - " + before + " ;");
+            }
+
+            let report = {};
+            if (pairs.length || additions.length || removals.length) {
+              fs.writeFileSync(path.join(directory, "pairs.txt"), [
+                "File pairs compared: " + pairs.length, ...pairs,
+                "Files added: " + additions.length, ...additions,
+                "Files removed: " + removals.length, ...removals, "",
+              ].join("\n"));
+              const nonCode = "AsciiDoc,CSV,INI,JSON,JSON5,Markdown,reStructuredText,SVG,Text,TOML,XML,YAML";
+              const cloc = await exec.getExecOutput("cloc", [
+                "--diff-list-file=pairs.txt", "--by-file", "--json", "--quiet", "--skip-uniqueness",
+                "--timeout=0", "--diff-timeout=0", "--exclude-lang=" + nonCode,
+              ], { ...options, cwd: directory });
+              const output = cloc.stdout.trim();
+              if (output && output !== "Nothing to count.") report = JSON.parse(output);
+            }
+
+            const changes = ["added", "removed", "modified"].map(
+              kind => new Map(Object.entries(report[kind] ?? {}))
+            );
+            for (const { added, removed, newPath, key } of files) {
+              const counts = changes.map(group => group.get(key));
+              if (counts.some(count => count !== undefined)) {
+                const isTest = testDirectories.some(directory => newPath.startsWith(directory + "/"));
+                const row = isTest ? totals[1] : totals[0];
+                counts.forEach((count, column) => { row[column] += count?.code ?? 0; });
+              } else {
+                totals[2][0] += Number(added);
+                totals[2][1] += Number(removed);
+              }
+            }
+            return totals;
+          } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+          }
+
+    - name: Update PR line count comment
+      uses: actions/github-script@v9
+      env:
+        COUNTS: ${{ steps.count.outputs.result }}
+      with:
+        script: |
+          const counts = JSON.parse(process.env.COUNTS);
+          const labels = ["Source LOC", "Test LOC", "Docs, data, and assets"];
+          if (
+            !Array.isArray(counts) || counts.length !== labels.length ||
+            !counts.every(row => Array.isArray(row) && row.length === 3 &&
+              row.every(value => Number.isSafeInteger(value) && value >= 0))
+          ) {
+            throw new Error("Invalid PR line counts");
+          }
+
+          const marker = "<!-- ophyd-devices-pr-line-count -->";
+          const body = [
+            marker,
+            "### PR line count",
+            "",
+            "| Category | Added | Removed | Modified |",
+            "| --- | ---: | ---: | ---: |",
+            ...counts.map(([added, removed, modified], index) =>
+              `| ${labels[index]} | ${added} | ${removed} | ${index === 2 ? "—" : modified} |`
+            ),
+            "",
+            "cloc counts source and test code. Git counts text changes in the other files.",
+          ].join("\n");
+
+          const issue = { ...context.repo, issue_number: context.issue.number };
+          const comments = await github.paginate(github.rest.issues.listComments, {
+            ...issue,
+            per_page: 100,
+          });
+          const existing = comments.find(({ user, body }) =>
+            user?.login === "github-actions[bot]" && body?.startsWith(marker)
+          );
+          if (!existing) {
+            await github.rest.issues.createComment({ ...issue, body });
+          } else if (existing.body !== body) {
+            await github.rest.issues.updateComment({
+              ...context.repo,
+              comment_id: existing.id,
+              body,
+            });
+          }
